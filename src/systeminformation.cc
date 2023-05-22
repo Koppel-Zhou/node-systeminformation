@@ -282,7 +282,7 @@ napi_value GetScreenInfo(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetManufacturer(napi_env env, napi_callback_info info) {
+napi_value GetVendor(napi_env env, napi_callback_info info) {
     napi_value result;
     std::string manufacturer = "";
 
@@ -312,15 +312,15 @@ napi_value GetManufacturer(napi_env env, napi_callback_info info) {
 
 napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor descriptors[] = {
-        {"getDeviceUUID", 0, GetDeviceUUID, 0, 0, 0, napi_default, 0},
-        {"getDeviceSerialNumber", 0, GetSerialNumber, 0, 0, 0, napi_default, 0},
-        {"getDeviceSystemVersion", 0, GetSystemVersion, 0, 0, 0, napi_default, 0},
-        {"getDeviceSystemArch", 0, GetSystemArch, 0, 0, 0, napi_default, 0},
-        {"getDeviceProductName", 0, GetProductName, 0, 0, 0, napi_default, 0},
-        {"getDeviceMemorySize", 0, GetMemorySize, 0, 0, 0, napi_default, 0},
-        {"getDeviceCPUInfo", 0, GetCPUInfo, 0, 0, 0, napi_default, 0},
-        {"getDeviceScreenInfo", 0, GetScreenInfo, 0, 0, 0, napi_default, 0},
-        {"getDeviceManufacturer", 0, GetManufacturer, 0, 0, 0, napi_default, 0}
+        {"getUUID", 0, GetDeviceUUID, 0, 0, 0, napi_default, 0},
+        {"getSerialNumber", 0, GetSerialNumber, 0, 0, 0, napi_default, 0},
+        {"getSystemVersion", 0, GetSystemVersion, 0, 0, 0, napi_default, 0},
+        {"getSystemArch", 0, GetSystemArch, 0, 0, 0, napi_default, 0},
+        {"getProductName", 0, GetProductName, 0, 0, 0, napi_default, 0},
+        {"getMemorySize", 0, GetMemorySize, 0, 0, 0, napi_default, 0},
+        {"getCPUInfo", 0, GetCPUInfo, 0, 0, 0, napi_default, 0},
+        {"getScreenInfo", 0, GetScreenInfo, 0, 0, 0, napi_default, 0},
+        {"getVendor", 0, GetVendor, 0, 0, 0, napi_default, 0}
     };
 
     napi_define_properties(env, exports, sizeof(descriptors) / sizeof(*descriptors), descriptors);
