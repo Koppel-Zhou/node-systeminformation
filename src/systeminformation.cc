@@ -14,23 +14,25 @@
 #include <Windows.h>
 #include <WinBase.h>
 #include <intrin.h>
+#include <wbemidl.h>
+#pragma comment(lib, "wbemuuid.lib")
 #endif
 
 void TrimTail(char* source_str, char trim_char)
 {
-	if(NULL == source_str)
-		return;
+    if(NULL == source_str)
+        return;
 
-	// 从尾部开始跳过trim_char指定字符
-	int source_str_len = strlen(source_str);
-	char* source_str_point = source_str;
-	int source_str_last_index = source_str_len - 1;
-	while(source_str_last_index >= 0 && *(source_str_point + source_str_last_index) == trim_char)
-		source_str_last_index--;
-	
-	// 计算新字符串长度并在结尾赋值为0
-	source_str_len = source_str_last_index + 1;
-	*(source_str+source_str_len) = 0;
+    // 从尾部开始跳过trim_char指定字符
+    int source_str_len = strlen(source_str);
+    char* source_str_point = source_str;
+    int source_str_last_index = source_str_len - 1;
+    while(source_str_last_index >= 0 && *(source_str_point + source_str_last_index) == trim_char)
+        source_str_last_index--;
+
+    // 计算新字符串长度并在结尾赋值为0
+    source_str_len = source_str_last_index + 1;
+    *(source_str+source_str_len) = 0;
 }
 
 napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
@@ -51,19 +53,98 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
     }
 #endif
 #ifdef WIN32
-    FILE* stream = _popen("wmic csproduct get uuid", "r");
-    if (stream) {
-        char buffer[128];
-        if (fgets(buffer, 128, stream) != NULL) {
-            if (fgets(buffer, 128, stream) != NULL) {
-                TrimTail(buffer, char(10));   // 过滤尾部 \n
-                TrimTail(buffer, char(13));   // 过滤尾部 \r
-                TrimTail(buffer, char(32));   // 过滤尾部 空格
-                uuid = buffer;
-            }
-        }
-        _pclose(stream);
+    // FILE* stream = _popen("wmic csproduct get uuid", "r");
+    // if (stream) {
+    //     char buffer[128];
+    //     if (fgets(buffer, 128, stream) != NULL) {
+    //         if (fgets(buffer, 128, stream) != NULL) {
+    //             TrimTail(buffer, char(10));   // 过滤尾部 \n
+    //             TrimTail(buffer, char(13));   // 过滤尾部 \r
+    //             TrimTail(buffer, char(32));   // 过滤尾部 空格
+    //             uuid = buffer;
+    //         }
+    //     }
+    //     _pclose(stream);
+    // }
+    IWbemServices* pSvc = NULL;
+    IWbemLocator* pLoc = NULL;
+    HRESULT hres;
+
+    // 初始化 COM
+    hres = CoInitializeEx(0, COINIT_MULTITHREADED);
+    if (FAILED(hres)) {
+        napi_throw_error(env, NULL, "Failed to initialize COM");
+        return NULL;
     }
+
+    // 创建 WMI Locator 实例
+    hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID*)&pLoc);
+    if (FAILED(hres)) {
+        CoUninitialize();
+        napi_throw_error(env, NULL, "Failed to create IWbemLocator instance");
+        return NULL;
+    }
+
+    // 连接 WMI
+    hres = pLoc->ConnectServer(_bstr_t(L"ROOT\\CIMV2"), NULL, NULL, 0, NULL, 0, 0, &pSvc);
+    if (FAILED(hres)) {
+        pLoc->Release();
+        CoUninitialize();
+        napi_throw_error(env, NULL, "Failed to connect to WMI");
+        return NULL;
+    }
+
+    // 设置验证信息
+    hres = CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+    if (FAILED(hres)) {
+        pSvc->Release();
+        pLoc->Release();
+        CoUninitialize();
+        napi_throw_error(env, NULL, "Failed to set proxy blanket");
+        return NULL;
+    }
+
+    // 执行查询
+    IEnumWbemClassObject* pEnumerator = NULL;
+    hres = pSvc->ExecQuery(
+        bstr_t("WQL"), bstr_t("SELECT * FROM Win32_BaseBoard"),
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &pEnumerator);
+    if (FAILED(hres)) {
+        pSvc->Release();
+        pLoc->Release();
+        CoUninitialize();
+        napi_throw_error(env, NULL, "Failed to execute WQL query");
+        return NULL;
+    }
+
+    // 获取查询结果
+    IWbemClassObject* pclsObj = NULL;
+    ULONG uReturn = 0;
+
+    while (pEnumerator) {
+        hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+        if (uReturn == 0) {
+        break;
+        }
+
+        VARIANT vtProp;
+        hres = pclsObj->Get(L"SerialNumber", 0, &vtProp, 0, 0);
+        if (SUCCEEDED(hres)) {
+        if (vtProp.vt == VT_NULL) {
+            uuid = "";
+        } else {
+            uuid = _bstr_t(vtProp.bstrVal);
+        }
+        VariantClear(&vtProp);
+        }
+
+        pclsObj->Release();
+    }
+
+    // 释放资源
+    pSvc->Release();
+    pLoc->Release();
+    CoUninitialize();
 #endif
 
     napi_create_string_utf8(env, uuid.c_str(), NAPI_AUTO_LENGTH, &result);
@@ -267,7 +348,7 @@ napi_value GetScreenInfo(napi_env env, napi_callback_info info) {
     CGDirectDisplayID displayId = CGMainDisplayID();
     width = CGDisplayPixelsWide(displayId);
     height = CGDisplayPixelsHigh(displayId);
-    
+
 #endif
 #ifdef WIN32
     width = (int)GetSystemMetrics(SM_CXSCREEN);
