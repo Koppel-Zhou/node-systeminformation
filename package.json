@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "pretest": "babel lib --out-dir dist",
-    "preinstall": "node-gyp rebuild",
+    "postinstall": "node-gyp rebuild",
     "build": "node-gyp rebuild",
     "prepare": "babel lib --out-dir dist",
     "test": "node --napi-modules ./test/binding.test.js"
