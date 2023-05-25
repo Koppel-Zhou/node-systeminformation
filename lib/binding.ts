@@ -1,4 +1,4 @@
-const addon = require('../build/Release/systeminformation-native');
+const addon = require('../build/Release/systeminformation');
 
 export = {
     getDeviceUUID: addon.getDeviceUUID,
