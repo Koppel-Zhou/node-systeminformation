@@ -15,9 +15,40 @@
 #include <WinBase.h>
 #include <intrin.h>
 #include <wbemidl.h>
- #include <comutil.h>
+#include <comutil.h>
+#include <combaseapi.h>
+#include <Objbase.h>
+#include <WinError.h>
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "comsuppw.lib")
+bool isSecurityInitialized = false;
+#endif
+
+#ifdef WIN32
+const char *GetErrorMessageFromHRESULT(HRESULT hr)
+{
+    LPWSTR lpMsgBuf = NULL;
+    DWORD result = FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL,
+        hr,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        (LPWSTR)&lpMsgBuf,
+        0,
+        NULL);
+
+    if (result == 0)
+    {
+        return "Failed to get error message.";
+    }
+
+    int bufferSize = WideCharToMultiByte(CP_UTF8, 0, lpMsgBuf, -1, NULL, 0, NULL, NULL);
+    char *errorMessage = new char[bufferSize];
+    WideCharToMultiByte(CP_UTF8, 0, lpMsgBuf, -1, errorMessage, bufferSize, NULL, NULL);
+
+    LocalFree(lpMsgBuf);
+    return errorMessage;
+}
 #endif
 
 // void TrimTail(char* source_str, char trim_char)
@@ -37,15 +68,18 @@
 //     *(source_str+source_str_len) = 0;
 // }
 
-napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
+napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string uuid = "";
 
 #ifdef __APPLE__
     io_service_t platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"));
-    if (platformExpert) {
+    if (platformExpert)
+    {
         CFStringRef uuidRef = (CFStringRef)IORegistryEntryCreateCFProperty(platformExpert, CFSTR(kIOPlatformUUIDKey), kCFAllocatorDefault, 0);
-        if (uuidRef) {
+        if (uuidRef)
+        {
             char buffer[128];
             CFStringGetCString(uuidRef, buffer, 128, kCFStringEncodingUTF8);
             uuid = buffer;
@@ -74,30 +108,40 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
 
     HRESULT hres;
 
-    // Initialize COM
-    hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hres)) {
-        napi_throw_error(env, NULL, "Failed to initialize COM");
-        return nullptr;
-    }
+// Initialize COM
+        hres = CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
 
-    // Initialize security
-    hres = CoInitializeSecurity(
-        NULL,
-        -1,                          // COM authentication
-        NULL,                        // Authentication services
-        NULL,                        // Reserved
-        RPC_C_AUTHN_LEVEL_DEFAULT,    // Default authentication
-        RPC_C_IMP_LEVEL_IMPERSONATE,  // Default Impersonation
-        NULL,                        // Authentication info
-        EOAC_NONE,                   // Additional capabilities
-        NULL                         // Reserved
-    );
+    if (!isSecurityInitialized)
+    {
+        // Initialize security
+        hres = CoInitializeSecurity(
+            NULL,
+            -1,                          // COM authentication
+            NULL,                        // Authentication services
+            NULL,                        // Reserved
+            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
+            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
+            NULL,                        // Authentication info
+            EOAC_NONE,                   // Additional capabilities
+            NULL                         // Reserved
+        );
 
-    if (FAILED(hres)) {
-        CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to initialize security");
-        return nullptr;
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            CoUninitialize();
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
+        isSecurityInitialized = true;
     }
 
     // Obtain the initial locator to WMI
@@ -106,12 +150,14 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
         0,
         CLSCTX_INPROC_SERVER,
         IID_IWbemLocator,
-        (LPVOID *)&pLoc
-    );
+        (LPVOID *)&pLoc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to create IWbemLocator object");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -124,13 +170,15 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
         NULL,
         0,
         0,
-        &pSvc
-    );
+        &pSvc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to connect to WMI");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -143,14 +191,16 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
         RPC_C_AUTHN_LEVEL_CALL,
         RPC_C_IMP_LEVEL_IMPERSONATE,
         NULL,
-        EOAC_NONE
-    );
+        EOAC_NONE);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to set proxy blanket");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -160,14 +210,16 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
         _bstr_t(L"SELECT UUID FROM Win32_ComputerSystemProduct"),
         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
         NULL,
-        &pEnumerator
-    );
+        &pEnumerator);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to execute WQL query");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -179,15 +231,17 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
         WBEM_INFINITE,
         1,
         &pclsObj,
-        &uReturn
-    );
+        &uReturn);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get query result");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -196,13 +250,16 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
     // Get the value of the UUID property
     hres = pclsObj->Get(L"UUID", 0, &vtProp, 0, 0);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pclsObj->Release();
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get UUID property");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -224,15 +281,18 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
+napi_value GetSerialNumber(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string sn = "";
 
 #ifdef __APPLE__
     io_service_t platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"));
-    if (platformExpert) {
+    if (platformExpert)
+    {
         CFStringRef snRef = (CFStringRef)IORegistryEntryCreateCFProperty(platformExpert, CFSTR(kIOPlatformSerialNumberKey), kCFAllocatorDefault, 0);
-        if (snRef) {
+        if (snRef)
+        {
             char buffer[128];
             CFStringGetCString(snRef, buffer, 128, kCFStringEncodingUTF8);
             sn = buffer;
@@ -259,31 +319,40 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
     IEnumWbemClassObject *pEnumerator = NULL;
 
     HRESULT hres;
+// Initialize COM
+        hres = CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
 
-    // Initialize COM
-    hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hres)) {
-        napi_throw_error(env, NULL, "Failed to initialize COM");
-        return nullptr;
-    }
+    if (!isSecurityInitialized)
+    {
+        // Initialize security
+        hres = CoInitializeSecurity(
+            NULL,
+            -1,                          // COM authentication
+            NULL,                        // Authentication services
+            NULL,                        // Reserved
+            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
+            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
+            NULL,                        // Authentication info
+            EOAC_NONE,                   // Additional capabilities
+            NULL                         // Reserved
+        );
 
-    // Initialize security
-    hres = CoInitializeSecurity(
-        NULL,
-        -1,                          // COM authentication
-        NULL,                        // Authentication services
-        NULL,                        // Reserved
-        RPC_C_AUTHN_LEVEL_DEFAULT,    // Default authentication
-        RPC_C_IMP_LEVEL_IMPERSONATE,  // Default Impersonation
-        NULL,                        // Authentication info
-        EOAC_NONE,                   // Additional capabilities
-        NULL                         // Reserved
-    );
-
-    if (FAILED(hres)) {
-        CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to initialize security");
-        return nullptr;
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            CoUninitialize();
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
+        isSecurityInitialized = true;
     }
 
     // Obtain the initial locator to WMI
@@ -292,12 +361,14 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
         0,
         CLSCTX_INPROC_SERVER,
         IID_IWbemLocator,
-        (LPVOID *)&pLoc
-    );
+        (LPVOID *)&pLoc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to create IWbemLocator object");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -310,13 +381,15 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
         NULL,
         0,
         0,
-        &pSvc
-    );
+        &pSvc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to connect to WMI");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -329,14 +402,16 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
         RPC_C_AUTHN_LEVEL_CALL,
         RPC_C_IMP_LEVEL_IMPERSONATE,
         NULL,
-        EOAC_NONE
-    );
+        EOAC_NONE);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to set proxy blanket");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -346,14 +421,16 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
         _bstr_t(L"SELECT SerialNumber FROM Win32_Bios"),
         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
         NULL,
-        &pEnumerator
-    );
+        &pEnumerator);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to execute WQL query");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -365,15 +442,17 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
         WBEM_INFINITE,
         1,
         &pclsObj,
-        &uReturn
-    );
+        &uReturn);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get query result");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -382,13 +461,16 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
     // Get the value of the SerialNumber property
     hres = pclsObj->Get(L"SerialNumber", 0, &vtProp, 0, 0);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pclsObj->Release();
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get SerialNumber property");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -410,13 +492,15 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetSystemArch(napi_env env, napi_callback_info info) {
+napi_value GetSystemArch(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string sys_arch = "";
 
 #ifdef __APPLE__
     struct utsname name;
-    if (uname(&name) == 0) {
+    if (uname(&name) == 0)
+    {
         sys_arch = name.machine;
     }
     napi_create_string_utf8(env, sys_arch.c_str(), NAPI_AUTO_LENGTH, &result);
@@ -424,24 +508,36 @@ napi_value GetSystemArch(napi_env env, napi_callback_info info) {
 #ifdef WIN32
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);
-    if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) {
+    if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+    {
         napi_create_string_utf8(env, "x64", NAPI_AUTO_LENGTH, &result);
-    } else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64) {
+    }
+    else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64)
+    {
         napi_create_string_utf8(env, "Itanium-based", NAPI_AUTO_LENGTH, &result);
-    } else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM) {
+    }
+    else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM)
+    {
         napi_create_string_utf8(env, "ARM", NAPI_AUTO_LENGTH, &result);
-    } else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64) {
+    }
+    else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64)
+    {
         napi_create_string_utf8(env, "ARM64", NAPI_AUTO_LENGTH, &result);
-    } else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL) {
+    }
+    else if (systemInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+    {
         napi_create_string_utf8(env, "x86", NAPI_AUTO_LENGTH, &result);
-    } else {
+    }
+    else
+    {
         napi_create_string_utf8(env, "Unknown", NAPI_AUTO_LENGTH, &result);
     }
 #endif
     return result;
 }
 
-napi_value GetSystemVersion(napi_env env, napi_callback_info info) {
+napi_value GetSystemVersion(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string sys_version = "";
 
@@ -449,7 +545,8 @@ napi_value GetSystemVersion(napi_env env, napi_callback_info info) {
     size_t bufferSize = 0;
     sysctlbyname("kern.osproductversion", NULL, &bufferSize, NULL, 0);
 
-    if (bufferSize > 0) {
+    if (bufferSize > 0)
+    {
         char *buffer = new char[bufferSize];
         sysctlbyname("kern.osproductversion", buffer, &bufferSize, NULL, 0);
         sys_version = std::string(buffer);
@@ -461,7 +558,8 @@ napi_value GetSystemVersion(napi_env env, napi_callback_info info) {
     ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
 
-    if (GetVersionEx((OSVERSIONINFO *)&osvi)) {
+    if (GetVersionEx((OSVERSIONINFO *)&osvi))
+    {
         sys_version = std::to_string(osvi.dwMajorVersion) + "." + std::to_string(osvi.dwMinorVersion);
     }
 #endif
@@ -469,7 +567,8 @@ napi_value GetSystemVersion(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetProductName(napi_env env, napi_callback_info info) {
+napi_value GetProductName(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string prod_name = "";
 
@@ -477,7 +576,8 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
     size_t bufferSize = 0;
     sysctlbyname("hw.model", NULL, &bufferSize, NULL, 0);
 
-    if (bufferSize > 0) {
+    if (bufferSize > 0)
+    {
         char *buffer = new char[bufferSize];
         sysctlbyname("hw.model", buffer, &bufferSize, NULL, 0);
         prod_name = std::string(buffer);
@@ -504,44 +604,55 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
 
     HRESULT hres;
 
-    // Initialize COM
-    hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hres)) {
-        napi_throw_error(env, NULL, "Failed to initialize COM");
-        return nullptr;
+// Initialize COM
+        hres = CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
+
+    if (!isSecurityInitialized)
+    {
+        // Initialize security
+        hres = CoInitializeSecurity(
+            NULL,
+            -1,                          // COM authentication
+            NULL,                        // Authentication services
+            NULL,                        // Reserved
+            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
+            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
+            NULL,                        // Authentication info
+            EOAC_NONE,                   // Additional capabilities
+            NULL                         // Reserved
+        );
+
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            CoUninitialize();
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
+        isSecurityInitialized = true;
     }
-
-    // Initialize security
-    hres = CoInitializeSecurity(
-        NULL,
-        -1,                          // COM authentication
-        NULL,                        // Authentication services
-        NULL,                        // Reserved
-        RPC_C_AUTHN_LEVEL_DEFAULT,    // Default authentication
-        RPC_C_IMP_LEVEL_IMPERSONATE,  // Default Impersonation
-        NULL,                        // Authentication info
-        EOAC_NONE,                   // Additional capabilities
-        NULL                         // Reserved
-    );
-
-    if (FAILED(hres)) {
-        CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to initialize security");
-        return nullptr;
-    }
-
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(
         CLSID_WbemLocator,
         0,
         CLSCTX_INPROC_SERVER,
         IID_IWbemLocator,
-        (LPVOID *)&pLoc
-    );
+        (LPVOID *)&pLoc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to create IWbemLocator object");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -554,13 +665,15 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
         NULL,
         0,
         0,
-        &pSvc
-    );
+        &pSvc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to connect to WMI");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -573,14 +686,16 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
         RPC_C_AUTHN_LEVEL_CALL,
         RPC_C_IMP_LEVEL_IMPERSONATE,
         NULL,
-        EOAC_NONE
-    );
+        EOAC_NONE);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to set proxy blanket");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -590,14 +705,16 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
         _bstr_t(L"SELECT Name FROM Win32_ComputerSystemProduct"),
         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
         NULL,
-        &pEnumerator
-    );
+        &pEnumerator);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to execute WQL query");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -609,15 +726,17 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
         WBEM_INFINITE,
         1,
         &pclsObj,
-        &uReturn
-    );
+        &uReturn);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get query result");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -626,13 +745,16 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
     // Get the value of the Name property
     hres = pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pclsObj->Release();
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get Name property");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -653,7 +775,8 @@ napi_value GetProductName(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetMemorySize(napi_env env, napi_callback_info info) {
+napi_value GetMemorySize(napi_env env, napi_callback_info info)
+{
     napi_value result;
     uint64_t memsize = 0;
 
@@ -662,7 +785,8 @@ napi_value GetMemorySize(napi_env env, napi_callback_info info) {
     mib[0] = CTL_HW;
     mib[1] = HW_MEMSIZE;
     size_t length = sizeof(memsize);
-    if (sysctl(mib, 2, &memsize, &length, NULL, 0) != 0) {
+    if (sysctl(mib, 2, &memsize, &length, NULL, 0) != 0)
+    {
         napi_throw_error(env, NULL, "Failed to get memory size");
         return NULL;
     }
@@ -677,7 +801,8 @@ napi_value GetMemorySize(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetCPUInfo(napi_env env, napi_callback_info info) {
+napi_value GetCPUInfo(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string cpu = "";
 
@@ -685,7 +810,8 @@ napi_value GetCPUInfo(napi_env env, napi_callback_info info) {
     size_t bufferSize = 0;
     sysctlbyname("machdep.cpu.brand_string", NULL, &bufferSize, NULL, 0);
 
-    if (bufferSize > 0) {
+    if (bufferSize > 0)
+    {
         char *buffer = new char[bufferSize];
         sysctlbyname("machdep.cpu.brand_string", buffer, &bufferSize, NULL, 0);
         cpu = std::string(buffer);
@@ -710,7 +836,8 @@ napi_value GetCPUInfo(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value GetScreenInfo(napi_env env, napi_callback_info info) {
+napi_value GetScreenInfo(napi_env env, napi_callback_info info)
+{
     napi_value result, prop_width, prop_height;
     napi_status status = napi_generic_failure;
     status = napi_create_object(env, &result);
@@ -729,13 +856,16 @@ napi_value GetScreenInfo(napi_env env, napi_callback_info info) {
     napi_create_uint32(env, width, &prop_width);
     napi_create_uint32(env, height, &prop_height);
     status = napi_set_named_property(env, result, "width", prop_width);
-    if (status != napi_ok) return NULL;
+    if (status != napi_ok)
+        return NULL;
     status = napi_set_named_property(env, result, "height", prop_height);
-    if (status != napi_ok) return NULL;
+    if (status != napi_ok)
+        return NULL;
     return result;
 }
 
-napi_value GetVendor(napi_env env, napi_callback_info info) {
+napi_value GetVendor(napi_env env, napi_callback_info info)
+{
     napi_value result;
     std::string manufacturer = "";
 
@@ -757,36 +887,46 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
     //     }
     //     _pclose(stream);
     // }
-        IWbemLocator *pLoc = NULL;
+    IWbemLocator *pLoc = NULL;
     IWbemServices *pSvc = NULL;
     IEnumWbemClassObject *pEnumerator = NULL;
 
     HRESULT hres;
 
-    // Initialize COM
-    hres = CoInitializeEx(0, COINIT_MULTITHREADED);
-    if (FAILED(hres)) {
-        napi_throw_error(env, NULL, "Failed to initialize COM");
-        return nullptr;
-    }
+// Initialize COM
+        hres = CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
 
-    // Initialize security
-    hres = CoInitializeSecurity(
-        NULL,
-        -1,                          // COM authentication
-        NULL,                        // Authentication services
-        NULL,                        // Reserved
-        RPC_C_AUTHN_LEVEL_DEFAULT,    // Default authentication
-        RPC_C_IMP_LEVEL_IMPERSONATE,  // Default Impersonation
-        NULL,                        // Authentication info
-        EOAC_NONE,                   // Additional capabilities
-        NULL                         // Reserved
-    );
+    if (!isSecurityInitialized)
+    {
+        // Initialize security
+        hres = CoInitializeSecurity(
+            NULL,
+            -1,                          // COM authentication
+            NULL,                        // Authentication services
+            NULL,                        // Reserved
+            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
+            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
+            NULL,                        // Authentication info
+            EOAC_NONE,                   // Additional capabilities
+            NULL                         // Reserved
+        );
 
-    if (FAILED(hres)) {
-        CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to initialize security");
-        return nullptr;
+        if (FAILED(hres))
+        {
+            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+            napi_throw_error(env, NULL, errorMessage);
+            CoUninitialize();
+            LocalFree((HLOCAL)errorMessage);
+            return nullptr;
+        }
+        isSecurityInitialized = true;
     }
 
     // Obtain the initial locator to WMI
@@ -795,12 +935,14 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
         0,
         CLSCTX_INPROC_SERVER,
         IID_IWbemLocator,
-        (LPVOID *)&pLoc
-    );
+        (LPVOID *)&pLoc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to create IWbemLocator object");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -813,13 +955,15 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
         NULL,
         0,
         0,
-        &pSvc
-    );
+        &pSvc);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to connect to WMI");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -832,14 +976,16 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
         RPC_C_AUTHN_LEVEL_CALL,
         RPC_C_IMP_LEVEL_IMPERSONATE,
         NULL,
-        EOAC_NONE
-    );
+        EOAC_NONE);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to set proxy blanket");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -849,14 +995,16 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
         _bstr_t(L"SELECT Vendor FROM Win32_ComputerSystemProduct"),
         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
         NULL,
-        &pEnumerator
-    );
+        &pEnumerator);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to execute WQL query");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -868,15 +1016,17 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
         WBEM_INFINITE,
         1,
         &pclsObj,
-        &uReturn
-    );
+        &uReturn);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get query result");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -885,13 +1035,16 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
     // Get the value of the Vendor property
     hres = pclsObj->Get(L"Vendor", 0, &vtProp, 0, 0);
 
-    if (FAILED(hres)) {
+    if (FAILED(hres))
+    {
         pclsObj->Release();
         pEnumerator->Release();
         pSvc->Release();
         pLoc->Release();
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        napi_throw_error(env, NULL, "Failed to get Vendor property");
+        LocalFree((HLOCAL)errorMessage);
         return nullptr;
     }
 
@@ -913,7 +1066,8 @@ napi_value GetVendor(napi_env env, napi_callback_info info) {
     return result;
 }
 
-napi_value Init(napi_env env, napi_value exports) {
+napi_value Init(napi_env env, napi_value exports)
+{
     napi_property_descriptor descriptors[] = {
         {"getUUID", 0, GetDeviceUUID, 0, 0, 0, napi_default, 0},
         {"getSerialNumber", 0, GetSerialNumber, 0, 0, 0, napi_default, 0},
@@ -923,8 +1077,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"getMemorySize", 0, GetMemorySize, 0, 0, 0, napi_default, 0},
         {"getCPUInfo", 0, GetCPUInfo, 0, 0, 0, napi_default, 0},
         {"getScreenInfo", 0, GetScreenInfo, 0, 0, 0, napi_default, 0},
-        {"getVendor", 0, GetVendor, 0, 0, 0, napi_default, 0}
-    };
+        {"getVendor", 0, GetVendor, 0, 0, 0, napi_default, 0}};
 
     napi_define_properties(env, exports, sizeof(descriptors) / sizeof(*descriptors), descriptors);
     return exports;

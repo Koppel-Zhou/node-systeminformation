@@ -1,10 +1,9 @@
 {
   'targets': [
     {
-      'target_name': 'systeminformation-native',
+      'target_name': 'systeminformation',
       'sources': [ 'src/systeminformation.cc' ],
-      'include_dirs': ["<!@(node -p \"require('node-addon-api').include\")"],
-      'dependencies': ["<!(node -p \"require('node-addon-api').gyp\")"],
+      'include_dirs': ["<!@(node -p \"require('node-addon-api').include_dir\")"],
       'cflags!': [ '-fno-exceptions' ],
       'cflags_cc!': [ '-fno-exceptions' ],
       'xcode_settings': {
