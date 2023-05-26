@@ -6,7 +6,6 @@
   },
   "gypfile": true,
   "main": "dist/binding.js",
-  "typings": "dist/binding.d.ts",
   "files": [
     "src",
     "lib",
