@@ -20,7 +20,7 @@
     "build": "node-gyp rebuild --dist-url=https://electronjs.org/headers",
     "test": "node --napi-modules ./test/index.test.js"
   },
-  "name": "@huohua/fast-systeminformation",
+  "name": "node-systeminformation",
   "author": "zhoukunpeng",
   "prettier": {
     "printWidth": 80,
