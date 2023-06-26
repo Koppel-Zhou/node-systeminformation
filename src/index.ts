@@ -1,16 +1,17 @@
-const addon = require('bindings')('systeminformation.node')
-const os = require('os');
-const { execSync } = require('child_process');
-const crypto = require('crypto');
+import bindings from 'bindings';
+import os from 'os';
+import { execSync } from 'child_process';
+import crypto from 'crypto';
+const addon = bindings('systeminformation.node');
 
 const _platform = process.platform;
 const _darwin = (_platform === 'darwin');
-let _mac = {};
+let _mac: any = {};
 
 function getMacAddresses() {
   let iface = '';
   let mac = '';
-  let result = {};
+  let result: any = {};
   if (_darwin) {
     const cmd = '/sbin/ifconfig';
     let res = execSync(cmd);
@@ -32,14 +33,14 @@ function getMacAddresses() {
 }
 
 function networkInterfaces() {
-  let ifaces = os.networkInterfaces();
-  let result = [];
+  let ifaces: any = os.networkInterfaces();
+  let result: any = [];
   for (let dev in ifaces) {
     let ip4 = '';
     let ip6 = '';
     let mac = '';
     if (Object.hasOwnProperty.call(ifaces, dev)) {
-      ifaces[dev].forEach(function (details) {
+      ifaces[dev].forEach(function (details: any) {
         if (details.family === 'IPv4') {
           ip4 = details.address;
         }
@@ -73,27 +74,36 @@ const getUUID = () => {
     UUID.length !== 36 ||
     UUID === '03000200-0400-0500-0006-000700080009' ||
     UUID === '00000000-0000-0000-0000-000000000000' ||
-    UUID === 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF') {
+    UUID === 'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF' ||
+    UUID === 'FEFEFEFE-FEFE-FEFE-FEFE-FEFEFEFEFEFE' ||
+    UUID === '12345678-1234-5678-90AB-CDDEEFAABBCC') {
     const networkInfo = networkInterfaces();
     const tmp_str = networkInfo
-      .filter((item) => Boolean(!item.internal && item.mac))
-      .map((item) => item.mac)
+      .filter((item: any) => Boolean(!item.internal && item.mac))
+      .map((item: any) => item.mac)
       .join('-')
     UUID = crypto.createHash('md5').update(`-${tmp_str}`).digest('hex');
   }
   return UUID || '';
 }
 
-module.exports = {
+export default {
   getUUID: getUUID,
   getSerialNumber: addon.getSerialNumber,
   getSystemArch: addon.getSystemArch,
   getSystemVersion: addon.getSystemVersion,
   getProductName: addon.getProductName,
   getMemorySize: addon.getMemorySize,
-  getCPUInfo: addon.getCPUInfo,
+  getCPUInfo: addon.getCPU,
   getScreenInfo: addon.getScreenInfo,
   getVendor: addon.getVendor,
+  getCaption: addon.getCaption,
+  getAudioDevices: addon.getAudioDevices,
+  getVideoDevices: addon.getVideoDevices,
+  getMicrophoneDevices: addon.getMicrophoneDevices,
+  getSpeakerDevices: addon.getSpeakerDevices,
+  getGraphic: addon.getGraphic,
+  getDiskSpaceInfo: addon.getDiskSpaceInfo,
   getInfo: () => {
     return {
       uuid: getUUID(),
@@ -102,7 +112,7 @@ module.exports = {
       version: addon.getSystemVersion(),
       product_name: addon.getProductName(),
       memory: addon.getMemorySize(),
-      cpu: addon.getCPUInfo(),
+      cpu: addon.getCPU(),
       screen_resolution: addon.getScreenInfo(),
       vendor: addon.getVendor()
     }
