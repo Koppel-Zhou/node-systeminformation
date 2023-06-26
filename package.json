@@ -28,14 +28,14 @@
     "singleQuote": true,
     "trailingComma": "es5"
   },
-  "module": "dist/fast-systeminformation.esm.js",
+  "module": "dist/node-systeminformation.esm.js",
   "size-limit": [
     {
-      "path": "dist/fast-systeminformation.cjs.production.min.js",
+      "path": "dist/node-systeminformation.cjs.production.min.js",
       "limit": "10 KB"
     },
     {
-      "path": "dist/fast-systeminformation.esm.js",
+      "path": "dist/node-systeminformation.esm.js",
       "limit": "10 KB"
     }
   ],
