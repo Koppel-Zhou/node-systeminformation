@@ -1,6 +1,8 @@
 #include <node_api.h>
 #include <iostream>
 #include <string>
+#include <array>
+#include <vector>
 
 #ifdef __APPLE__
 #include <IOKit/IOKitLib.h>
@@ -34,7 +36,6 @@
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "comsuppw.lib")
 #pragma comment(lib, "propsys.lib")
-bool isSecurityInitialized = false;
 #endif
 
 #ifdef __APPLE__
@@ -246,31 +247,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
@@ -443,31 +420,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
@@ -653,15 +606,31 @@ napi_value GetSystemVersion(napi_env env, napi_callback_info info)
     napi_value result;
     std::string sys_version = "";
 #ifdef __APPLE__
-    size_t bufferSize = 0;
-    sysctlbyname("kern.osproductversion", NULL, &bufferSize, NULL, 0);
+    // // The value obtained in this way will be affected by SYSTEM_VERSION_COMPAT, but it is faster
+    // size_t bufferSize = 0;
+    // sysctlbyname("kern.osproductversion", NULL, &bufferSize, NULL, 0);
 
-    if (bufferSize > 0)
-    {
-        char *buffer = new char[bufferSize];
-        sysctlbyname("kern.osproductversion", buffer, &bufferSize, NULL, 0);
-        sys_version = std::string(buffer);
-        delete[] buffer;
+    // if (bufferSize > 0)
+    // {
+    //     char *buffer = new char[bufferSize];
+    //     sysctlbyname("kern.osproductversion", buffer, &bufferSize, NULL, 0);
+    //     sys_version = std::string(buffer);
+    //     delete[] buffer;
+    // }
+
+    std::string command = "sw_vers -ProductVersion";
+    FILE* pipe = popen(command.c_str(), "r");
+    if (pipe) {
+        char buffer[128];
+        while (!feof(pipe)) {
+            if (fgets(buffer, 128, pipe) != nullptr)
+                sys_version += buffer;
+        }
+        pclose(pipe);
+    }
+
+    if (!sys_version.empty() && sys_version[sys_version.length() - 1] == '\n') {
+        sys_version.erase(sys_version.length() - 1);
     }
 #endif
 #ifdef WIN32
@@ -722,31 +691,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
 
@@ -926,18 +871,161 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
     napi_create_string_utf8(env, cpu.c_str(), NAPI_AUTO_LENGTH, &result);
 #endif
 #ifdef WIN32
-    int cpuInfo[4] = {-1};
-    __cpuid(cpuInfo, 0x80000002);
-    char szBrand[48];
-    memcpy(szBrand, cpuInfo, sizeof(cpuInfo));
+    // // This method cannot get the correct value on the Microsoft Surface device
+    // int cpuInfo[4] = {-1};
+    // __cpuid(cpuInfo, 0x80000002);
+    // char szBrand[48];
+    // memcpy(szBrand, cpuInfo, sizeof(cpuInfo));
 
-    __cpuid(cpuInfo, 0x80000003);
-    memcpy(szBrand + 16, cpuInfo, sizeof(cpuInfo));
+    // __cpuid(cpuInfo, 0x80000003);
+    // memcpy(szBrand + 16, cpuInfo, sizeof(cpuInfo));
 
-    __cpuid(cpuInfo, 0x80000004);
-    memcpy(szBrand + 32, cpuInfo, sizeof(cpuInfo));
+    // __cpuid(cpuInfo, 0x80000004);
+    // memcpy(szBrand + 32, cpuInfo, sizeof(cpuInfo));
 
-    napi_create_string_utf8(env, szBrand, NAPI_AUTO_LENGTH, &result);
+    IWbemLocator *pLoc = NULL;
+    IWbemServices *pSvc = NULL;
+    IEnumWbemClassObject *pEnumerator = NULL;
+
+    HRESULT hres = S_OK;
+
+    // Initialize COM
+    hres = CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+    if (FAILED(hres))
+    {
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    // Obtain the initial locator to WMI
+    hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
+
+    if (FAILED(hres))
+    {
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        CoUninitialize();
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    // Connect to WMI through the IWbemLocator::ConnectServer method
+    hres = pLoc->ConnectServer(
+        _bstr_t(L"ROOT\\CIMV2"),
+        NULL,
+        NULL,
+        0,
+        NULL,
+        0,
+        0,
+        &pSvc);
+
+    if (FAILED(hres))
+    {
+        SAFE_RELEASE(pLoc);
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        CoUninitialize();
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    // Set security levels on the proxy
+    hres = CoSetProxyBlanket(
+        pSvc,
+        RPC_C_AUTHN_WINNT,
+        RPC_C_AUTHZ_NONE,
+        NULL,
+        RPC_C_AUTHN_LEVEL_CALL,
+        RPC_C_IMP_LEVEL_IMPERSONATE,
+        NULL,
+        EOAC_NONE);
+
+    if (FAILED(hres))
+    {
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        CoUninitialize();
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    // Use the IWbemServices pointer to make requests of WMI
+    hres = pSvc->ExecQuery(
+        _bstr_t(L"WQL"),
+        _bstr_t(L"SELECT Name FROM Win32_Processor"),
+        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+        NULL,
+        &pEnumerator);
+
+    if (FAILED(hres))
+    {
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        CoUninitialize();
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    IWbemClassObject *pclsObj;
+    ULONG uReturn = 0;
+
+    // Get the data from the query result
+    hres = pEnumerator->Next(
+        WBEM_INFINITE,
+        1,
+        &pclsObj,
+        &uReturn);
+
+    if (FAILED(hres))
+    {
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        CoUninitialize();
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    VARIANT vtProp;
+
+    // Get the value of the CPU property
+    hres = pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
+
+    if (FAILED(hres))
+    {
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
+        napi_throw_error(env, NULL, errorMessage);
+        CoUninitialize();
+        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    // Convert the CPU value to a string
+    std::string cpuStr = "";
+    cpuStr = _com_util::ConvertBSTRToString(vtProp.bstrVal);
+
+    napi_create_string_utf8(env, cpuStr.c_str(), NAPI_AUTO_LENGTH, &result);
+
+    // Clean up
+    VariantClear(&vtProp);
+    SAFE_RELEASE(pclsObj);
+    SAFE_RELEASE(pEnumerator);
+    SAFE_RELEASE(pSvc);
+    SAFE_RELEASE(pLoc);
+    CoUninitialize();
 #endif
     return result;
 }
@@ -996,31 +1084,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
@@ -1163,41 +1227,75 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
     std::string caption = "";
 
 #ifdef __APPLE__
-    CFStringRef filePath = CFSTR("/System/Library/CoreServices/SystemVersion.plist");
-    CFURLRef fileURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, filePath, kCFURLPOSIXPathStyle, false);
-    CFReadStreamRef fileStream = CFReadStreamCreateWithFile(kCFAllocatorDefault, fileURL);
-    CFRelease(fileURL);
+    // // The value obtained in this way will be affected by SYSTEM_VERSION_COMPAT, but it is faster
+    // CFStringRef filePath = CFSTR("/System/Library/CoreServices/SystemVersion.plist");
+    // CFURLRef fileURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, filePath, kCFURLPOSIXPathStyle, false);
+    // CFReadStreamRef fileStream = CFReadStreamCreateWithFile(kCFAllocatorDefault, fileURL);
+    // CFRelease(fileURL);
 
-    if (fileStream) {
-        CFReadStreamOpen(fileStream);
-        CFPropertyListFormat format;
-        CFErrorRef error;
-        CFPropertyListRef plist = CFPropertyListCreateWithStream(kCFAllocatorDefault, fileStream, 0, kCFPropertyListImmutable, &format, &error);
+    // if (fileStream) {
+    //     CFReadStreamOpen(fileStream);
+    //     CFPropertyListFormat format;
+    //     CFErrorRef error;
+    //     CFPropertyListRef plist = CFPropertyListCreateWithStream(kCFAllocatorDefault, fileStream, 0, kCFPropertyListImmutable, &format, &error);
 
-        if (plist && format == kCFPropertyListXMLFormat_v1_0) {
-            CFDictionaryRef dict = static_cast<CFDictionaryRef>(plist);
-            CFStringRef productName = static_cast<CFStringRef>(CFDictionaryGetValue(dict, CFSTR("ProductName")));
-            CFStringRef productVersion = static_cast<CFStringRef>(CFDictionaryGetValue(dict, CFSTR("ProductVersion")));
+    //     if (plist && format == kCFPropertyListXMLFormat_v1_0) {
+    //         CFDictionaryRef dict = static_cast<CFDictionaryRef>(plist);
+    //         CFStringRef productName = static_cast<CFStringRef>(CFDictionaryGetValue(dict, CFSTR("ProductName")));
+    //         CFStringRef productVersion = static_cast<CFStringRef>(CFDictionaryGetValue(dict, CFSTR("ProductVersion")));
 
-            if (productName && productVersion) {
-                CFIndex length = CFStringGetLength(productName) + CFStringGetLength(productVersion);
-                CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8);
-                char* buffer = new char[maxSize];
-                if (CFStringGetCString(productName, buffer, maxSize, kCFStringEncodingUTF8)) {
-                    caption = buffer;
-                }
-                if (CFStringGetCString(productVersion, buffer, maxSize, kCFStringEncodingUTF8)) {
-                    caption += " ";
-                    caption += buffer;
-                }
-                delete[] buffer;
-            }
+    //         if (productName && productVersion) {
+    //             CFIndex length = CFStringGetLength(productName) + CFStringGetLength(productVersion);
+    //             CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8);
+    //             char* buffer = new char[maxSize];
+    //             if (CFStringGetCString(productName, buffer, maxSize, kCFStringEncodingUTF8)) {
+    //                 caption = buffer;
+    //             }
+    //             if (CFStringGetCString(productVersion, buffer, maxSize, kCFStringEncodingUTF8)) {
+    //                 caption += " ";
+    //                 caption += buffer;
+    //             }
+    //             delete[] buffer;
+    //         }
+    //     }
+
+    //     CFRelease(plist);
+    //     CFReadStreamClose(fileStream);
+    //     CFRelease(fileStream);
+    // }
+
+    std::string nameCommand = "sw_vers -ProductName";
+    std::string name = "";
+    FILE* name_pipe = popen(nameCommand.c_str(), "r");
+    if (name_pipe) {
+        char buffer[128];
+        while (!feof(name_pipe)) {
+            if (fgets(buffer, 128, name_pipe) != nullptr)
+                name += buffer;
         }
-
-        CFRelease(plist);
-        CFReadStreamClose(fileStream);
-        CFRelease(fileStream);
+        pclose(name_pipe);
     }
+
+    if (!name.empty() && name[name.length() - 1] == '\n') {
+        name.erase(name.length() - 1);
+    }
+
+    std::string versionCommand = "sw_vers -ProductVersion";
+    std::string version = "";
+    FILE* version_pipe = popen(versionCommand.c_str(), "r");
+    if (version_pipe) {
+        char buffer[128];
+        while (!feof(version_pipe)) {
+            if (fgets(buffer, 128, version_pipe) != nullptr)
+                version += buffer;
+        }
+        pclose(version_pipe);
+    }
+
+    if (!version.empty() && version[version.length() - 1] == '\n') {
+        version.erase(version.length() - 1);
+    }
+    caption = name + " " + version;
 #endif
 #ifdef WIN32
     IWbemLocator *pLoc = NULL;
@@ -1216,31 +1314,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
@@ -1479,31 +1553,7 @@ napi_value GetAudioDevices(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
@@ -1779,31 +1829,7 @@ napi_value GetVideoDevices(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);
@@ -2125,31 +2151,7 @@ napi_value GetSpeakerDevices(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
     hres = CoCreateInstance(
         CLSID_MMDeviceEnumerator, NULL,
         CLSCTX_ALL, IID_IMMDeviceEnumerator,
@@ -2396,31 +2398,7 @@ napi_value GetMicrophoneDevices(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     hres = CoCreateInstance(CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, IID_IMMDeviceEnumerator, (void **)&pEnumerator);
     EXIT_ON_ERROR(hres);
@@ -2561,31 +2539,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         return NULL;
     }
 
-    if (!isSecurityInitialized)
-    {
-        // Initialize security
-        hres = CoInitializeSecurity(
-            NULL,
-            -1,                          // COM authentication
-            NULL,                        // Authentication services
-            NULL,                        // Reserved
-            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication
-            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
-            NULL,                        // Authentication info
-            EOAC_NONE,                   // Additional capabilities
-            NULL                         // Reserved
-        );
 
-        if (FAILED(hres))
-        {
-            const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-            napi_throw_error(env, NULL, errorMessage);
-            CoUninitialize();
-            LocalFree((HLOCAL)errorMessage);
-            return NULL;
-        }
-        isSecurityInitialized = true;
-    }
 
     // Obtain the initial locator to WMI
     hres = CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLoc);

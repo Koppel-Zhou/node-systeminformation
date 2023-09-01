@@ -94,7 +94,7 @@ export default {
   getSystemVersion: addon.getSystemVersion,
   getProductName: addon.getProductName,
   getMemorySize: addon.getMemorySize,
-  getCPUInfo: addon.getCPU,
+  getCPU: addon.getCPU,
   getScreenInfo: addon.getScreenInfo,
   getVendor: addon.getVendor,
   getCaption: addon.getCaption,
