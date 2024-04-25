@@ -5,7 +5,17 @@ function testBasic() {
   for (let key in si) {
     const start = perf_hooks.performance.now();
     console.log('>>>', key)
-    const result = si[key]();
+    let result = null;
+    if (key === 'getDiskSpaceInfo') {
+      result = si[key]('/');
+    } else if (key === 'regEditAdd') {
+      // result = si[key]("HKEY_CURRENT_USER", "SOFTWARE\\5ETest\\hhh\\MyValueName","test", "REG_SZ", "hahaha");
+    } else if (key === 'regEditDelete') {
+      result = si[key]("HKEY_CURRENT_USER", "SOFTWARE\\5ETest\\hhh\\MyValueName\\test");
+    } else {
+      result = si[key]('/');
+    }
+    
     console.log(
       `----------------------------------------\nCall ${key}`.padEnd(20),
       `\n\nResult:\n${JSON.stringify(result)}`.padEnd(40),

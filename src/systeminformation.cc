@@ -111,6 +111,21 @@ std::string extractChipsetModel(const std::string& output) {
 #ifdef WIN32
 const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
 const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
+#define NAPI_CALL_BASE(env, the_call)                                   \
+  do {                                                                  \
+    if ((the_call) != napi_ok) {                                        \
+      const napi_extended_error_info* error_info;                       \
+      napi_get_last_error_info((env), &error_info);                     \
+      bool is_pending;                                                  \
+      napi_is_exception_pending((env), &is_pending);                    \
+      if (!is_pending) {                                                \
+        const char* error_message = (error_info->error_message == NULL ? "empty error message" : error_info->error_message); \
+        napi_throw_error((env), NULL, error_message);                   \
+      }                                                                 \
+    }                                                                   \
+  } while (0)
+
+#define NAPI_CALL(env, the_call) NAPI_CALL_BASE((env), (the_call))
 
 #define SAFE_RELEASE(punk) \
     if ((punk) != NULL)    \
@@ -2778,6 +2793,125 @@ napi_value GetDiskSpaceInfo(napi_env env, napi_callback_info info) {
     return result;
 }
 
+napi_value RegEditAdd(napi_env env, napi_callback_info info) {
+  size_t argc = 5;
+  napi_value argv[5];
+  napi_value result;
+
+  NAPI_CALL(env, napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+
+  if (argc < 5) {
+    napi_throw_error(env, nullptr, "Wrong number of arguments");
+    return nullptr;
+  }
+
+  char rootKey[256], subKey[256], key[256], valueType[256], value[256];
+  size_t rootKeyLength, subKeyLength, keyLength, valueTypeLength, valueLength;
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[0], rootKey, sizeof(rootKey), &rootKeyLength));
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[1], subKey, sizeof(subKey), &subKeyLength));
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[2], key, sizeof(key), &keyLength));
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[3], valueType, sizeof(valueType), &valueTypeLength));
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[4], value, sizeof(value), &valueLength));
+
+  HKEY hRootKey;
+  if (strcmp(rootKey, "HKEY_LOCAL_MACHINE") == 0) {
+    hRootKey = HKEY_LOCAL_MACHINE;
+  } else if (strcmp(rootKey, "HKEY_CURRENT_USER") == 0) {
+    hRootKey = HKEY_CURRENT_USER;
+  } else {
+    napi_throw_error(env, nullptr, "Invalid root key");
+    return nullptr;
+  }
+
+  HKEY hKey;
+  LONG regResult = RegOpenKeyExA(hRootKey, subKey, 0, KEY_SET_VALUE, &hKey);
+  if (regResult == ERROR_SUCCESS) {
+    DWORD dwType;
+    if (strcmp(valueType, "REG_SZ") == 0) {
+      dwType = REG_SZ;
+    } else if (strcmp(valueType, "REG_DWORD") == 0) {
+      dwType = REG_DWORD;
+    } else {
+      napi_throw_error(env, nullptr, "Invalid value type");
+      return nullptr;
+    }
+    RegSetValueExA(hKey, key, 0, dwType, reinterpret_cast<const BYTE*>(value), valueLength);
+    RegCloseKey(hKey);
+  } else {
+    // Key doesn't exist, create it
+    regResult = RegCreateKeyExA(hRootKey, subKey, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, NULL, &hKey, NULL);
+    if (regResult == ERROR_SUCCESS) {
+      DWORD dwType;
+      if (strcmp(valueType, "REG_SZ") == 0) {
+        dwType = REG_SZ;
+      } else if (strcmp(valueType, "REG_DWORD") == 0) {
+        dwType = REG_DWORD;
+      } else {
+        napi_throw_error(env, nullptr, "Invalid value type");
+        return nullptr;
+      }
+      RegSetValueExA(hKey, key, 0, dwType, reinterpret_cast<const BYTE*>(value), valueLength);
+      RegCloseKey(hKey);
+    } else {
+      // Failed to create key
+      napi_throw_error(env, nullptr, "Failed to open or create registry key");
+      return nullptr;
+    }
+  }
+
+  NAPI_CALL(env, napi_create_int32(env, regResult, &result)); // 将 LONG 类型的 regResult 转换为 napi_value 类型
+  return result;
+}
+
+napi_value RegEditDelete(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2];
+  napi_value result;
+
+  NAPI_CALL(env, napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+
+  if (argc < 2) {
+    napi_throw_error(env, nullptr, "Wrong number of arguments");
+    return nullptr;
+  }
+
+  char rootKey[256], subKey[256];
+  size_t rootKeyLength, subKeyLength;
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[0], rootKey, sizeof(rootKey), &rootKeyLength));
+  NAPI_CALL(env, napi_get_value_string_utf8(env, argv[1], subKey, sizeof(subKey), &subKeyLength));
+
+  HKEY hRootKey;
+  if (strcmp(rootKey, "HKEY_LOCAL_MACHINE") == 0) {
+    hRootKey = HKEY_LOCAL_MACHINE;
+  } else if (strcmp(rootKey, "HKEY_CURRENT_USER") == 0) {
+    hRootKey = HKEY_CURRENT_USER;
+  } else {
+    napi_throw_error(env, nullptr, "Invalid root key");
+    return nullptr;
+  }
+
+  // Check if the second parameter is a value or key
+  DWORD valueType;
+  LONG regResult = RegQueryValueExA(hRootKey, subKey, NULL, &valueType, NULL, NULL);
+  if (regResult == ERROR_SUCCESS) {
+    // Second parameter is a value, delete the value
+    regResult = RegDeleteValueA(hRootKey, subKey);
+  } else {
+    // Second parameter is not a value, it's a key. Delete the key and all its values.
+    regResult = RegDeleteTreeA(hRootKey, subKey);
+  }
+
+  if (regResult != ERROR_SUCCESS) {
+    char errorMsg[256];
+    sprintf(errorMsg, "Failed to delete registry key or value. Error code: %d", regResult);
+    napi_throw_error(env, nullptr, errorMsg);
+    return nullptr;
+  }
+
+  NAPI_CALL(env, napi_create_int32(env, regResult, &result));
+  return result;
+}
+
 napi_value Init(napi_env env, napi_value exports)
 {
     napi_property_descriptor descriptors[] = {
@@ -2796,7 +2930,9 @@ napi_value Init(napi_env env, napi_value exports)
         {"getMicrophoneDevices", 0, GetMicrophoneDevices, 0, 0, 0, napi_default, 0},
         {"getSpeakerDevices", 0, GetSpeakerDevices, 0, 0, 0, napi_default, 0},
         {"getGraphic", 0, GetGraphic, 0, 0, 0, napi_default, 0},
-        {"getDiskSpaceInfo", 0, GetDiskSpaceInfo, 0, 0, 0, napi_default, 0}
+        {"getDiskSpaceInfo", 0, GetDiskSpaceInfo, 0, 0, 0, napi_default, 0},
+        { "regEditAdd", 0, RegEditAdd, 0, 0, 0, napi_default, 0 },
+        { "regEditDelete", 0, RegEditDelete, 0, 0, 0, napi_default, 0 }
     };
 
 

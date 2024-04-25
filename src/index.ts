@@ -104,6 +104,8 @@ export default {
   getSpeakerDevices: addon.getSpeakerDevices,
   getGraphic: addon.getGraphic,
   getDiskSpaceInfo: addon.getDiskSpaceInfo,
+  regEditAdd: addon.regEditAdd,
+  regEditDelete: addon.regEditDelete,
   getInfo: () => {
     return {
       uuid: getUUID(),
