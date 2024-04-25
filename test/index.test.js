@@ -1,56 +1,19 @@
 const si = require('../dist/index').default;
-const assert = require('assert')
-const perf_hooks = require('perf_hooks')
-function testBasic () {
-  const start = perf_hooks.performance.now()
-  const result = si.getUUID()
-  console.log('DeviceUUID'.padEnd(20), `${result}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start}`)
-  const start2 = perf_hooks.performance.now()
-  const result2 = si.getSerialNumber()
-  console.log('DeviceSerialNumber'.padEnd(20), `${result2}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start2}`)
-  const start3 = perf_hooks.performance.now()
-  const result3 = si.getSystemArch()
-  console.log('DeviceSystemArch'.padEnd(20), `${result3}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start3}`)
-  const start4 = perf_hooks.performance.now()
-  const result4 = si.getSystemVersion()
-  console.log('DeviceSystemVersion'.padEnd(20), `${result4}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start4}`)
-  const start5 = perf_hooks.performance.now()
-  const result5 = si.getProductName()
-  console.log('DeviceProductName'.padEnd(20), `${result5}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start5}`)
-  const start6 = perf_hooks.performance.now()
-  const result6 = si.getMemorySize()
-  console.log('DeviceMemorySize'.padEnd(20), `${result6}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start6}`)
-  const start7 = perf_hooks.performance.now()
-  const result7 = si.getCPU()
-  console.log('DeviceCPU'.padEnd(20), `${result7}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start7}`)
-  const start8 = perf_hooks.performance.now()
-  const result8 = si.getScreenInfo()
-  console.log('DeviceScreenInfo'.padEnd(20), `${JSON.stringify(result8)}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start8}`)
-  const start9 = perf_hooks.performance.now()
-  const result9 = si.getVendor()
-  console.log('DeviceVendor'.padEnd(20), `${result9}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - start9}`)
-  const caption_start = perf_hooks.performance.now()
-  const caption_result = si.getCaption()
-  console.log('DeviceCaption'.padEnd(20), `${caption_result}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - caption_start}`)
-  const audio_start = perf_hooks.performance.now()
-  const audio_result = si.getAudioDevices()
-  console.log('Audio_DeviceInfo'.padEnd(20), `\n${JSON.stringify(audio_result)}`.padEnd(40), `\n耗时 ${perf_hooks.performance.now() - audio_start}`)
-  const video_start = perf_hooks.performance.now()
-  const video_result = si.getVideoDevices()
-  console.log('Video_DeviceInfo'.padEnd(20), `\n${JSON.stringify(video_result)}`.padEnd(40), `\n耗时 ${perf_hooks.performance.now() - video_start}`)
-  const microphone_start = perf_hooks.performance.now()
-  const microphone_result = si.getMicrophoneDevices()
-  console.log('Microphone_DeviceInfo'.padEnd(20), `\n${JSON.stringify(microphone_result)}`.padEnd(40), `\n耗时 ${perf_hooks.performance.now() - microphone_start}`)
-  const speaker_start = perf_hooks.performance.now()
-  const speaker_result = si.getSpeakerDevices()
-  console.log('Speaker_DeviceInfo'.padEnd(20), `\n${JSON.stringify(speaker_result)}`.padEnd(40), `\n耗时 ${perf_hooks.performance.now() - speaker_start}`)
-  const graphic_start = perf_hooks.performance.now()
-  const graphic_result = si.getGraphic()
-  console.log('Graphic_DeviceInfo'.padEnd(20), `${graphic_result}`.padEnd(40), `\n耗时 ${perf_hooks.performance.now() - graphic_start}`)
-  const disk_start = perf_hooks.performance.now()
-  const disk_result = si.getDiskSpaceInfo('/')
-  console.log('Disk__DeviceInfo'.padEnd(20), `\n${JSON.stringify(disk_result)}`.padEnd(40), `耗时 ${perf_hooks.performance.now() - disk_start}`)
+const assert = require('assert');
+const perf_hooks = require('perf_hooks');
+function testBasic() {
+  for (let key in si) {
+    const start = perf_hooks.performance.now();
+    console.log('>>>', key)
+    const result = si[key]();
+    console.log(
+      `----------------------------------------\nCall ${key}`.padEnd(20),
+      `\n\nResult:\n${JSON.stringify(result)}`.padEnd(40),
+      `\n\nCost time ${perf_hooks.performance.now() - start}ms`
+    );
+  }
 
+  return 0;
 }
 
 assert.doesNotThrow(testBasic, () => console.log('Tests passed- everything looks OK!'), 'testBasic threw an expection')
