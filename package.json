@@ -12,7 +12,6 @@
     "dist",
     "binding.gyp"
   ],
-
   "scripts": {
     "prepare": "tsdx build",
     "size": "size-limit",
@@ -45,6 +44,7 @@
   },
   "devDependencies": {
     "@types/bindings": "^1.5.1",
-    "node-gyp": "^8.0.0"
+    "node-gyp": "^10.1.0",
+    "tsdx": "^0.14.1"
   }
 }
