@@ -121,18 +121,58 @@ const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
 
 char *ConvertLPWSTRToChar(LPCWSTR lpwstr)
 {
+    if (lpwstr == NULL) {
+        return NULL;
+    }
+    
     int size = WideCharToMultiByte(CP_UTF8, 0, lpwstr, -1, NULL, 0, NULL, NULL);
+    if (size <= 0) {
+        return NULL;
+    }
+    
     char* buffer = new char[size];
-    WideCharToMultiByte(CP_UTF8, 0, lpwstr, -1, buffer, size, NULL, NULL);
+    if (!buffer) {
+        return NULL;
+    }
+    
+    if (WideCharToMultiByte(CP_UTF8, 0, lpwstr, -1, buffer, size, NULL, NULL) == 0) {
+        delete[] buffer;
+        return NULL;
+    }
+    
     return buffer;
 }
 // Helper function to convert BSTR to char*
 char *ConvertBstrToChar(BSTR bstr)
 {
+    if (bstr == NULL) {
+        return NULL;
+    }
+    
     int length = SysStringLen(bstr);
+    if (length == 0) {
+        char *result = new char[1];
+        if (result) {
+            result[0] = '\0';
+        }
+        return result;
+    }
+    
     int size = WideCharToMultiByte(CP_UTF8, 0, bstr, length, NULL, 0, NULL, NULL);
+    if (size <= 0) {
+        return NULL;
+    }
+    
     char *result = new char[size + 1];
-    WideCharToMultiByte(CP_UTF8, 0, bstr, length, result, size, NULL, NULL);
+    if (!result) {
+        return NULL;
+    }
+    
+    if (WideCharToMultiByte(CP_UTF8, 0, bstr, length, result, size, NULL, NULL) == 0) {
+        delete[] result;
+        return NULL;
+    }
+    
     result[size] = '\0';
     return result;
 }
@@ -202,9 +242,18 @@ const char *GetErrorMessageFromHRESULT(HRESULT hres)
     }
 
     int bufferSize = WideCharToMultiByte(CP_UTF8, 0, lpMsgBuf, -1, NULL, 0, NULL, NULL);
+    if (bufferSize <= 0) {
+        LocalFree(lpMsgBuf);
+        return "Failed to convert error message.";
+    }
+    
     char *errorMessage = new char[bufferSize];
+    if (!errorMessage) {
+        LocalFree(lpMsgBuf);
+        return "Memory allocation failed.";
+    }
+    
     WideCharToMultiByte(CP_UTF8, 0, lpMsgBuf, -1, errorMessage, bufferSize, NULL, NULL);
-
     LocalFree(lpMsgBuf);
     return errorMessage;
 }
@@ -243,7 +292,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -257,7 +306,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -278,7 +327,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -300,7 +349,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -319,7 +368,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -333,7 +382,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -341,7 +390,7 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -356,20 +405,32 @@ napi_value GetDeviceUUID(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
-        return NULL;
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
+    }
+
+    // Check if the UUID value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
     }
 
     // Convert the UUID value to a string
     std::wstring uuid_buf = vtProp.bstrVal;
     int size = WideCharToMultiByte(CP_UTF8, 0, uuid_buf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string uuidStr(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, uuid_buf.c_str(), -1, &uuidStr[0], size, nullptr, nullptr);
-
-    uuid = uuidStr;
+    if (size > 0) {
+        std::string uuidStr(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, uuid_buf.c_str(), -1, &uuidStr[0], size, nullptr, nullptr);
+        uuid = uuidStr;
+    }
 
     // Clean up
     VariantClear(&vtProp);
@@ -416,7 +477,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -430,7 +491,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -451,7 +512,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -473,7 +534,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -492,7 +553,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -506,7 +567,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -514,7 +575,7 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -529,20 +590,32 @@ napi_value GetSerialNumber(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
-        return NULL;
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
+    }
+
+    // Check if the SerialNumber value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
     }
 
     // Convert the SerialNumber value to a string
     std::wstring sn_buf = vtProp.bstrVal;
     int size = WideCharToMultiByte(CP_UTF8, 0, sn_buf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string snStr(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, sn_buf.c_str(), -1, &snStr[0], size, nullptr, nullptr);
-
-    sn = snStr;
+    if (size > 0) {
+        std::string snStr(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, sn_buf.c_str(), -1, &snStr[0], size, nullptr, nullptr);
+        sn = snStr;
+    }
 
     // Clean up
     VariantClear(&vtProp);
@@ -687,7 +760,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -700,7 +773,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -721,7 +794,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -743,7 +816,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -762,7 +835,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -776,7 +849,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -784,7 +857,7 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -799,20 +872,32 @@ napi_value GetProductName(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
-        return NULL;
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
+    }
+
+    // Check if the Name value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
     }
 
     // Convert the Name value to a string
     std::wstring name_buf = vtProp.bstrVal;
     int size = WideCharToMultiByte(CP_UTF8, 0, name_buf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string nameStr(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, name_buf.c_str(), -1, &nameStr[0], size, nullptr, nullptr);
-
-    prod_name = nameStr;
+    if (size > 0) {
+        std::string nameStr(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, name_buf.c_str(), -1, &nameStr[0], size, nullptr, nullptr);
+        prod_name = nameStr;
+    }
 
     // Clean up
     VariantClear(&vtProp);
@@ -895,7 +980,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -907,7 +992,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -928,7 +1013,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -950,7 +1035,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -969,7 +1054,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -983,7 +1068,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -991,7 +1076,7 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1006,10 +1091,19 @@ napi_value GetCPU(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        return NULL;
+    }
+
+    // Check if the CPU value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
         return NULL;
     }
 
@@ -1080,7 +1174,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1094,7 +1188,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1115,7 +1209,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1137,7 +1231,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1156,7 +1250,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1170,7 +1264,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -1178,7 +1272,7 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1193,20 +1287,32 @@ napi_value GetVendor(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
-        return NULL;
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
+    }
+
+    // Check if the Vendor value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
     }
 
     // Convert the Vendor value to a string
     std::wstring vendor_buf = vtProp.bstrVal;
     int size = WideCharToMultiByte(CP_UTF8, 0, vendor_buf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string vendorStr(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, vendor_buf.c_str(), -1, &vendorStr[0], size, nullptr, nullptr);
-
-    manufacturer = vendorStr;
+    if (size > 0) {
+        std::string vendorStr(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, vendor_buf.c_str(), -1, &vendorStr[0], size, nullptr, nullptr);
+        manufacturer = vendorStr;
+    }
 
     // Clean up
     VariantClear(&vtProp);
@@ -1310,7 +1416,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1324,7 +1430,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1345,7 +1451,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1367,7 +1473,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1386,7 +1492,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1400,7 +1506,7 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -1408,13 +1514,13 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
     VARIANT vtProp;
 
-    // Get the value of the Vendor property
+    // Get the value of the Caption property
     hres = pclsObj->Get(L"Caption", 0, &vtProp, 0, 0);
 
     if (FAILED(hres))
@@ -1423,20 +1529,32 @@ napi_value GetCaption(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
-        return NULL;
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
+    }
+
+    // Check if the Caption value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
     }
 
     // Convert the Caption value to a string
     std::wstring caption_buf = vtProp.bstrVal;
     int size = WideCharToMultiByte(CP_UTF8, 0, caption_buf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string captionStr(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, caption_buf.c_str(), -1, &captionStr[0], size, nullptr, nullptr);
-
-    caption = captionStr;
+    if (size > 0) {
+        std::string captionStr(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, caption_buf.c_str(), -1, &captionStr[0], size, nullptr, nullptr);
+        caption = captionStr;
+    }
 
     // Clean up
     VariantClear(&vtProp);
@@ -1549,7 +1667,7 @@ napi_value GetAudioDevices(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1563,7 +1681,7 @@ napi_value GetAudioDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1584,7 +1702,7 @@ napi_value GetAudioDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1606,7 +1724,7 @@ napi_value GetAudioDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1626,7 +1744,7 @@ napi_value GetAudioDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1825,7 +1943,7 @@ napi_value GetVideoDevices(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1839,7 +1957,7 @@ napi_value GetVideoDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1860,7 +1978,7 @@ napi_value GetVideoDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1882,7 +2000,7 @@ napi_value GetVideoDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -1901,7 +2019,7 @@ napi_value GetVideoDevices(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2147,7 +2265,7 @@ napi_value GetSpeakerDevices(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2394,7 +2512,7 @@ napi_value GetMicrophoneDevices(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2535,7 +2653,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
     {
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2549,7 +2667,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2570,7 +2688,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2592,7 +2710,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2611,7 +2729,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2625,7 +2743,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         &pclsObj,
         &uReturn);
 
-    if (FAILED(hres))
+    if (FAILED(hres) || uReturn == 0)
     {
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
@@ -2633,7 +2751,7 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         const char *errorMessage = GetErrorMessageFromHRESULT(hres);
         napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
+        delete[] errorMessage;
         return NULL;
     }
 
@@ -2648,20 +2766,32 @@ napi_value GetGraphic(napi_env env, napi_callback_info info)
         SAFE_RELEASE(pEnumerator);
         SAFE_RELEASE(pSvc);
         SAFE_RELEASE(pLoc);
-        const char *errorMessage = GetErrorMessageFromHRESULT(hres);
-        napi_throw_error(env, NULL, errorMessage);
         CoUninitialize();
-        LocalFree((HLOCAL)errorMessage);
-        return NULL;
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
+    }
+
+    // Check if the Caption value is valid
+    if (vtProp.vt != VT_BSTR || vtProp.bstrVal == NULL)
+    {
+        VariantClear(&vtProp);
+        SAFE_RELEASE(pclsObj);
+        SAFE_RELEASE(pEnumerator);
+        SAFE_RELEASE(pSvc);
+        SAFE_RELEASE(pLoc);
+        CoUninitialize();
+        napi_create_string_utf8(env, "", NAPI_AUTO_LENGTH, &result);
+        return result;
     }
 
     // Convert the Caption value to a string
     std::wstring caption_buf = vtProp.bstrVal;
     int size = WideCharToMultiByte(CP_UTF8, 0, caption_buf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string captionStr(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, caption_buf.c_str(), -1, &captionStr[0], size, nullptr, nullptr);
-
-    graphic = captionStr;
+    if (size > 0) {
+        std::string captionStr(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, caption_buf.c_str(), -1, &captionStr[0], size, nullptr, nullptr);
+        graphic = captionStr;
+    }
 
     // Clean up
     VariantClear(&vtProp);
